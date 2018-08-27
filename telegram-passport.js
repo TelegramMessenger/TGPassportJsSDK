@@ -4,6 +4,11 @@
       return Object.prototype.toString.call(arg) === '[object Array]';
     };
   }
+  if (!Object.isSimpleObject) {
+    Object.isSimpleObject = function(arg) {
+      return arg != null && typeof arg === 'object';
+    };
+  }
   function isFunction(func) {
     return func && {}.toString.call(func) === '[object Function]';
   }
@@ -34,6 +39,23 @@
   }
 
   var UA = window.navigator.userAgent || '';
+  var ScopeAliases = {
+    personal_details: 'pd',
+    passport: 'pp',
+    driver_license: 'dl',
+    identity_card: 'ic',
+    internal_passport: 'ip',
+    id_document: 'idd',
+    address: 'ad',
+    utility_bill: 'ub',
+    bank_statement: 'bs',
+    rental_agreement: 'ra',
+    passport_registration: 'pr',
+    temporary_registration: 'tr',
+    address_document: 'add',
+    phone_number: 'pn',
+    email: 'em',
+  };
 
   function openDeepLink(url, tooltipToggle) {
     var is_ios       = /ios|iphone os|iphone|ipod|ipad/i.test(UA);
@@ -92,31 +114,90 @@
     }
   }
 
+  function packScope(scope) {
+    if (scope.data) {
+      scope.d = scope.data;
+      delete scope.data;
+    }
+    if (!scope.d) {
+      throw new Error('scope data is required');
+    }
+    if (!scope.v) {
+      throw new Error('scope version is required');
+    }
+    for (var i = 0; i < scope.d.length; i++) {
+      scope.d[i] = packScopeField(scope.d[i]);
+    }
+    return JSON.stringify(scope);
+  }
+  function packScopeField(field) {
+    if (field.one_of) {
+      field._ = field.one_of;
+      delete field.one_of;
+    } else if (field.type) {
+      field._ = field.type;
+      delete field.type;
+    }
+    if (Array.isArray(field._)) {
+      for (var j = 0; j < field._.length; j++) {
+        field._[j] = packScopeField(field._[j]);
+      }
+      field = packScopeOpts(field);
+    } else if (field._) {
+      if (ScopeAliases[field._]) {
+        field._ = ScopeAliases[field._];
+      }
+      field = packScopeOpts(field);
+    } else if (ScopeAliases[field]) {
+      field = ScopeAliases[field];
+    }
+    return field;
+  }
+  function packScopeOpts(scope) {
+    if (scope.selfie) {
+      scope.s = 1;
+      delete scope.selfie;
+    }
+    if (scope.translation) {
+      scope.t = 1;
+      delete scope.translation;
+    }
+    if (scope.native_names) {
+      scope.n = 1;
+      delete scope.native_names;
+    }
+    return scope;
+  }
+
   function passportAuth(options, tooltipToggle) {
     if (!options.bot_id) {
-      alert('bot_id is required');
+      throw new Error('bot_id is required');
     }
     if (!options.scope) {
-      alert('scope is required');
+      throw new Error('scope is required');
     }
-    if (!Array.isArray(options.scope)) {
-      alert('scope should be array');
+    if (!Object.isSimpleObject(options.scope)) {
+      throw new TypeError('scope should be an object');
     }
     if (!options.public_key) {
-      alert('public_key is required');
+      throw new Error('public_key is required');
     }
-    if (!options.payload) {
-      alert('payload is required');
+    if (!options.nonce) {
+      throw new Error('nonce is required');
+    }
+    if (options.payload) {
+      throw new Error('payload is deprecated, use nonce instead');
     }
     var is_android = /android/i.test(UA);
     var url = (is_android ? 'tg:' : 'tg://') + 'resolve?domain=telegrampassport'
             + '&bot_id=' + encodeURIComponent(options.bot_id)
-            + '&scope=' + encodeURIComponent(JSON.stringify(options.scope))
+            + '&scope=' + encodeURIComponent(packScope(options.scope))
             + '&public_key=' + encodeURIComponent(options.public_key)
-            + '&payload=' + encodeURIComponent(options.payload);
+            + '&nonce=' + encodeURIComponent(options.nonce);
     if (options.callback_url) {
       url += '&callback_url=' + encodeURIComponent(options.callback_url);
     }
+    url += '&payload=nonce'; // legacy for outdated apps
     openDeepLink(url, tooltipToggle);
   }
 
